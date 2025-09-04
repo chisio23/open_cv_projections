@@ -44,20 +44,22 @@ def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
     
     image_open = cv2.imread(image_path, cv2.IMREAD_COLOR)
     
-    cv2.imshow("test:", image_open)
+    if image_open is None:
+        print("Error: Image not found or unable to read.")
+        
+    else: 
+        print("Image loaded successfully!")
+        
+    height, width, channels = image_open.shape
     
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    return{
+        
+        "width": width,
+        "height": height,
+        "channels": channels
+        
+    }          
     
-    
-    """
-    Load the frame image.
-    Inputs:
-        image_path: path to the image file
-    Returns:
-        image array, width, height, channel info
-    """
-    pass
 
 
 def load_extrinsics(extrinsics_source, frame_id, input_convention="cw"):
