@@ -4,21 +4,52 @@ import json
 import csv
 import matplotlib.pyplot as plt
 
+cameras_txt_path = "data/cameras/cameras.txt"
 
 def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
-    """
-    Load camera intrinsics from cameras.txt.
-    Inputs:
-        cameras_txt_path: path to cameras.txt
-        camera_id: which camera line to use
-        target_size: (width, height) to rescale intrinsics if image size differs
-    Returns:
-        dict with fx, fy, cx, cy, width, height
-    """
+    
+    with open(cameras_txt_path, "r") as f:
+        
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            
+            parts = line.strip().split()
+            
+            cam_id = int(parts[0])
+                      
+            if cam_id == camera_id:
+                
+                model = parts[1]
+                width = int(parts[2])
+                height = int(parts[3])
+                fx = float(parts[4])
+                fy = float(parts[5])
+                cx = float(parts[6])
+                cy = float(parts[7])
+                             
+                return {
+                    "fx": fx,
+                    "fy": fy,
+                    "cx": cx,
+                    "cy": cy,
+                    "width": width,
+                    "height": height,
+                    "model": model,
+                }                    
     pass
 
 
-def load_image(image_path):
+def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
+    
+    image_open = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    
+    cv2.imshow("test:", image_open)
+    
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    
+    
     """
     Load the frame image.
     Inputs:
@@ -141,6 +172,10 @@ def export_results(out_dir, overlay_image, uv, visible_mask, Zc, joint_names, me
 
 
 def main():
+    
+    load_cam_intrinsics(cameras_txt_path, 1)
+    load_image()
+    
     """
     Orchestrate the full pipeline for one frame.
     Steps:
