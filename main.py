@@ -3,6 +3,7 @@ import cv2
 import json
 import csv
 import matplotlib.pyplot as plt
+import os
 
 cameras_txt_path = "data/cameras/cameras.txt"
 
@@ -41,68 +42,45 @@ def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
 
 
 def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
-    
+    # Minimal fix: fail early if OpenCV can't read the image (avoid .shape on None)
     image_open = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    
     if image_open is None:
-        print("Error: Image not found or unable to read.")
-        
+        raise FileNotFoundError(f"Error: Image not found or unable to read → {image_path}")
     else: 
         print("Image loaded successfully!")
         
     height, width, channels = image_open.shape
     
-    return{
-        
-        "width": width,
-        "height": height,
-        "channels": channels
-        
+    return {
+    "width": width,
+    "height": height,
+    "channels": channels,
+    "image": image_open
     }  
             
-def load_extrinsics(frame_id, extrinsics_source = "data/cameras/images.txt", input_convention="cw"):
-        
+def load_extrinsics_by_name(image_name, extrinsics_source="data/cameras/images.txt"):
+    target = os.path.basename(image_name)  # <<< only take filename
     with open(extrinsics_source, "r") as f:
-        
         for line in f:
             if line.startswith("#") or line.strip() == "":
                 continue
-            
             parts = line.strip().split()
-            
-            image_id = int(parts[0])
-                      
-            if image_id == frame_id:
-                
-                qw = float(parts[1])
-                qx = float(parts[2])
-                qy = float(parts[3])
-                qz = float(parts[4])
-                tx = float(parts[5])
-                ty = float(parts[6])
-                tz = float(parts[7])
-                CAMERA_ID = int(parts[8])
-                IMAGE_NAME = parts[9]
-                
-                norm = (qw**2 + qx**2 + qy**2 +qz**2) **0.5
-                
-                qw,qx,qy,qz = qw/norm, qx/norm, qy/norm, qz/norm
-                
-                R =  np.array([
-                    [1-2*(qy**2 + qz**2), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
-                    [2*(qx*qy + qz*qw), 1-2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
-                    [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1-2*(qx**2 + qy**2)]
-                ])
-                            
-                t = np.array([tx,ty,tz])
-                             
-                return {
-                    
-                    "R": R,
-                    "T": t,
-                    "camera_id": CAMERA_ID,
-                    "image_name": IMAGE_NAME
-                }              
+            # IMAGE_ID qw qx qy qz tx ty tz CAMERA_ID IMAGE_NAME
+            if os.path.basename(parts[-1]) == target:
+                qw = float(parts[1]); qx = float(parts[2]); qy = float(parts[3]); qz = float(parts[4])
+                tx = float(parts[5]); ty = float(parts[6]); tz = float(parts[7])
+                cam_id = int(parts[8])
+
+                n = (qw*qw + qx*qx + qy*qy + qz*qz) ** 0.5
+                qw, qx, qy, qz = qw/n, qx/n, qy/n, qz/n
+                R = np.array([
+                    [1-2*(qy*qy+qz*qz),   2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
+                    [2*(qx*qy + qz*qw),   1-2*(qx*qx+qz*qz), 2*(qy*qz - qx*qw)],
+                    [2*(qx*qz - qy*qw),   2*(qy*qz + qx*qw), 1-2*(qx*qx+qy*qy)]
+                ], dtype=float)
+                t = np.array([tx, ty, tz], dtype=float)
+                return {"R": R, "T": t, "camera_id": cam_id, "image_name": target}
+    raise ValueError(f"Image name '{image_name}' not found in images.txt")         
     
 def parse_skl(skl_path="data/skeleton/0000.skl"):
     joint_names = []
@@ -158,7 +136,7 @@ def parse_skl(skl_path="data/skeleton/0000.skl"):
         else:
             parents.append(name_to_idx[pname])
 
-    units_hint = "cm"  # provisional
+    units_hint = "m"  # provisional
     return joint_names, parents, joints_raw, units_hint
 
 
@@ -254,7 +232,7 @@ def world_to_camera(joints_m, extrinsics):
         
         zc_list.append(zc)
         
-    return xc_list, zc_list
+    return np.array(xc_list), np.array(zc_list)
         
 
 def project_pinhole(xc_list, intrinsics):
@@ -282,98 +260,194 @@ def project_pinhole(xc_list, intrinsics):
     return uv_list 
 
 
-def visibility_mask(uv_list, Zc, width, height):
-    """
-    Check which joints are visible.
-    Returns:
-        boolean mask (N,)
-    """
-    pass
+def visibility_mask(uv_list, zc_list, width, height):
+    
+    N = len(uv_list)
+    return [True] * N
 
 
 def build_edges_from_parents(parents):
-    """
-    Build list of bones as (parent, child) pairs.
-    """
-    pass
+    
+    edges = []
+    
+    for i in range(len(parents)):
+        
+        p = parents[i]
+        
+        if p == -1: 
+            
+            continue
+        
+        else: 
+                        
+            edges.append((p, i))
+            
+    return edges
+
+def sort_edges_by_depth(edges, zc_list, order="far_to_near"):
+    
+    pairs = []
+    edges_sorted = []
+    
+    for (p, c) in edges:
+        dpc = (zc_list[p] + zc_list[c]) / 2
+        
+        pairs.append((dpc, (p,c)))
+        
+    if order == "far_to_near":
+        
+       pairs.sort(key=lambda x: x[0], reverse=True) 
+       
+    else:
+        
+        pairs.sort(key=lambda x: x[0], reverse=False)
+        
+    edges_sorted = edges_sorted = [edge for (_, edge) in pairs]
+
+    return edges_sorted   
+    
+def draw_skeleton(image, uv_list, visible_mask, edges_sorted, style=None):
+    cfg = {
+        "joint_radius": 3,
+        "joint_color": (0, 255, 255),    # yellow
+        "bone_color": (0, 255, 0),       # green
+        "bone_thickness": 2,
+        "alpha": 0.7,
+        "line_type": cv2.LINE_AA,
+    }
+    if style:
+        cfg.update(style)
+
+    # Prepare data
+    uv = np.asarray(uv_list, dtype=float)
+    N = uv.shape[0]
+    if visible_mask is None:
+        mask = np.ones(N, dtype=bool)
+    else:
+        mask = np.asarray(visible_mask, dtype=bool)
+        if mask.shape[0] != N:
+            raise ValueError("visible_mask length does not match uv_list length.")
+
+    H, W = image.shape[:2]
+    def _in_bounds(pt):
+        u, v = pt
+        return (0 <= u < W) and (0 <= v < H)
+
+    # Round to int for drawing (keep a safe copy)
+    uv_int = np.round(uv).astype(int)
+
+    base = image
+    overlay = base.copy()
+
+    # Draw bones (lines) first, in the provided order
+    for (p, c) in edges_sorted:
+        if p < 0 or c < 0 or p >= N or c >= N:
+            continue
+        if not (mask[p] and mask[c]):
+            continue
+        p_ok = np.isfinite(uv[p]).all() and _in_bounds(uv_int[p])
+        c_ok = np.isfinite(uv[c]).all() and _in_bounds(uv_int[c])
+        if not (p_ok and c_ok):
+            continue
+        pt1 = tuple(uv_int[p])
+        pt2 = tuple(uv_int[c])
+        cv2.line(
+            overlay,
+            pt1,
+            pt2,
+            color=cfg["bone_color"],
+            thickness=cfg["bone_thickness"],
+            lineType=cfg["line_type"],
+        )
+
+    # Draw joints (circles)
+    for i in range(N):
+        if not mask[i]:
+            continue
+        if not (np.isfinite(uv[i]).all() and _in_bounds(uv_int[i])):
+            continue
+        center = tuple(uv_int[i])
+        cv2.circle(
+            overlay,
+            center,
+            cfg["joint_radius"],
+            cfg["joint_color"],
+            thickness=-1,  # filled
+            lineType=cfg["line_type"],
+        )
+
+    # Alpha blend for a nicer overlay
+    alpha = float(cfg["alpha"])
+    alpha = max(0.0, min(1.0, alpha))
+    if alpha == 1.0:
+        out = overlay
+    elif alpha == 0.0:
+        out = base.copy()
+    else:
+        out = cv2.addWeighted(overlay, alpha, base, 1.0 - alpha, 0.0)
+
+    return out
 
 
-def sort_edges_by_depth(edges, Zc, order="far_to_near"):
-    """
-    Sort edges by average depth.
-    """
-    pass
-
-
-def draw_skeleton(image, uv, visible_mask, edges_sorted, style=None):
-    """
-    Draw joints and bones on the image.
-    Returns:
-        overlay image
-    """
-    pass
-
-
-def export_results(out_dir, overlay_image, uv, visible_mask, Zc, joint_names, meta):
+def export_results(out_dir, overlay_image, uv_list, visible_mask, zc_list, joint_names, meta):
     """
     Save overlay image and 2D keypoints/logs.
     """
     pass
 
+def _accumulate_local_to_world(parents, joints_local):
+    J = np.array(joints_local, dtype=float).copy()
+    N = len(J)
+    for i in range(N):
+        p = parents[i]
+        if p >= 0:
+            J[i] = J[p] + J[i]
+    return J
 
 def main():
-    
-    # 1) Intrínsecos (usa el camera_id que corresponda a tu frame)
-    intrinsics = load_cam_intrinsics(cameras_txt_path, camera_id=1)
+    image_name = "cam_0000/0000.png"
+
+    extrinsics = load_extrinsics_by_name(image_name, "data/cameras/images.txt")
+    print("Extrinsics:", extrinsics)
+
+    intrinsics = load_cam_intrinsics(cameras_txt_path, camera_id=extrinsics["camera_id"])
     print("Intrinsics:", intrinsics)
 
-    # 2) Imagen
     img_info = load_image("data/skin_color_1/cam_0000/0000.png")
     print("Image:", img_info)
 
-    # 3) Extrínsecos (usa el IMAGE_ID correcto del images.txt)
-    extrinsics = load_extrinsics(frame_id=1, extrinsics_source="data/cameras/images.txt")
-    print("Extrinsics:", extrinsics)
-
-    # 4) Esqueleto
     joint_names, parents, joints_raw, units_hint = parse_skl("data/skeleton/0000.skl")
     print("Parsed skeleton:", len(joint_names), "joints; units_hint =", units_hint)
 
-    # 5) Heurística global/local y escala sugerida (solo informativo)
     info = infer_global_or_local(parents, joints_raw)
     print("Skeleton info:", info)
 
-    # 6) Escala a metros (puedes preferir info['scale_suggestion'] si no es None)
-    units_for_scale = units_hint
-    if info.get("scale_suggestion") is not None and units_hint == "m":
-        # Si tu .skl no trae unidades fiables, puedes aplicar el sugerido
-        print("Overriding units with heuristic scale suggestion.")
-        # En ese caso, en vez de units_hint usarías un factor manual; aquí seguimos con units_hint.
-    joints_m, scale_used = apply_unit_scale(joints_raw, units_for_scale)
+    joints_m, scale_used = apply_unit_scale(joints_raw, units_hint)
     print("Applied scale factor:", scale_used)
 
-    # 7) Mundo → Cámara
     Xc, Zc = world_to_camera(joints_m, extrinsics)
     print("Camera coords shape:", Xc.shape)
     print("Zc (first 5):", Zc[:5])
-    
-    """
-    Orchestrate the full pipeline for one frame.
-    Steps:
-      1. Load intrinsics
-      2. Load image
-      3. Load extrinsics
-      4. Parse skeleton
-      5. Normalize skeleton to world + meters
-      6. Transform to camera
-      7. Project to 2D
-      8. Check visibility
-      9. Build & sort edges
-     10. Draw overlay
-     11. Export results
-    """
-    pass
 
+    image = img_info["image"]
+
+    uv_list = project_pinhole(Xc, intrinsics)
+
+    mask = visibility_mask(uv_list, Zc, intrinsics["width"], intrinsics["height"])
+
+    edges = build_edges_from_parents(parents)
+    edges_sorted = sort_edges_by_depth(edges, Zc, order="far_to_near")
+
+    overlay_image = draw_skeleton(
+        image, uv_list, mask, edges_sorted,
+        style={"bone_color": (0,0,255), "joint_color": (255,255,255),
+               "bone_thickness": 2, "joint_radius": 2, "alpha": 1.0}
+    )
+    cv2.imwrite("overlay_0000.png", overlay_image)
+    cv2.imshow("Skeleton Overlay", overlay_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+        
 
 if __name__ == "__main__":
     main()
