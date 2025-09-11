@@ -9,6 +9,13 @@ import re
 
 cameras_txt_path = "data/cameras/cameras.txt"
 
+def parse_mesh_obj(obj_path = "data/skin_color_1/objs/0000.obj"):
+    
+    mesh_vectors = []
+    mesh_f = []
+    
+    ...
+
 def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
     
     with open(cameras_txt_path, "r") as f:
