@@ -1,0 +1,1 @@
+This performs projection of joints from 3D to 2D using a standard pinhole camera model
