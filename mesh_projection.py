@@ -7,14 +7,31 @@ import os
 import random
 import re 
 
-cameras_txt_path = "data/cameras/cameras.txt"
+# -----------------------------
+# PATHS (EDIT THESE)
+# -----------------------------
+CAMERAS_TXT_PATH = "data/cameras/cameras.txt"
+IMAGES_TXT_PATH  = "data/cameras/images.txt"
+IMAGE_DIR        = "data/skin_color_1/cam_0000"
+OBJ_DIR          = "data/skin_color_1/objs"
 
-def parse_mesh_obj(obj_path = "data/skin_color_1/objs/0000.obj"):
+# IO
+FRAME_GLOB_PATTERN = "frame_%04d.png"
+OUTPUT_VIDEO_PATH  = "skeleton.mp4"
+
+# RANGE
+NUM_FRAMES = 57
+
+cameras_txt_path = CAMERAS_TXT_PATH
+
+
+def parse_mesh_obj(obj_path=OBJ_DIR + "/0000.obj"):
     
     mesh_vectors = []
     mesh_f = []
     
     ...
+
 
 def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
     
@@ -50,7 +67,7 @@ def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
     pass
 
 
-def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
+def load_image(image_path=IMAGE_DIR + "/0000.png"):
     image_open = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if image_open is None:
         raise FileNotFoundError(f"Error: Image not found or unable to read → {image_path}")
@@ -66,7 +83,7 @@ def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
     "image": image_open
     }  
             
-def load_extrinsics_by_name(image_name, extrinsics_source="data/cameras/images.txt"):
+def load_extrinsics_by_name(image_name, extrinsics_source=IMAGES_TXT_PATH):
     target = os.path.basename(image_name)
     with open(extrinsics_source, "r") as f:
         for line in f:
@@ -160,25 +177,25 @@ def _read_available_frame_indices(images_txt_path):
     return frames
 
 def render_sequence():
-    frames = _read_available_frame_indices("data/cameras/images.txt")
+    frames = _read_available_frame_indices(IMAGES_TXT_PATH)
     if not frames:
         raise RuntimeError("No frames found in images.txt")    
 
-    for i in range(57):
+    for i in range(NUM_FRAMES):
         image_name_for_extrinsics = "0000.png"
-        extrinsics = load_extrinsics_by_name(image_name_for_extrinsics, "data/cameras/images.txt")
+        extrinsics = load_extrinsics_by_name(image_name_for_extrinsics, IMAGES_TXT_PATH)
         print("Extrinsics:", extrinsics)
 
         intrinsics = load_cam_intrinsics(cameras_txt_path, camera_id=extrinsics["camera_id"])
         print("Intrinsics:", intrinsics)
 
-        img_info = load_image(f"data/skin_color_1/cam_0000/{i:04d}.png")
+        img_info = load_image(os.path.join(IMAGE_DIR, f"{i:04d}.png"))
         print("Image:", img_info)
 
         
 def video_generation():
     
-    cap = cv2.VideoCapture("frame_%04d.png")  # use your saved overlay images
+    cap = cv2.VideoCapture(FRAME_GLOB_PATTERN)
     
     if not cap.isOpened():
         print("Error: Could not open image sequence.")
@@ -191,11 +208,9 @@ def video_generation():
     
     frame_height, frame_width = frame.shape[:2]
     
-    # Use mp4v for .mp4 output
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter("skeleton.mp4", fourcc, 30.0, (frame_width, frame_height))
+    out = cv2.VideoWriter(OUTPUT_VIDEO_PATH, fourcc, 30.0, (frame_width, frame_height))
     
-    # Write first frame
     out.write(frame)
     
     while True:
@@ -208,7 +223,7 @@ def video_generation():
     cap.release()
     out.release()
     cv2.destroyAllWindows()
-    print("Video saved as skeleton.mp4")
+    print(f"Video saved as {OUTPUT_VIDEO_PATH}")
     
     
 def main():

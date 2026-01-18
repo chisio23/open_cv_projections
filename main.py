@@ -7,7 +7,23 @@ import os
 import random
 import re 
 
-cameras_txt_path = "data/cameras/cameras.txt"
+# -----------------------------
+# PATHS (EDIT THESE)
+# -----------------------------
+CAMERAS_TXT_PATH = "data/cameras/cameras.txt"
+IMAGES_TXT_PATH  = "data/cameras/images.txt"
+SKELETON_DIR     = "data/skeleton"
+IMAGE_DIR        = "data/skin_color_1/cam_0000"
+
+# IO
+OUTPUT_FRAME_PATTERN = "frame_{i:04d}.png"
+OUTPUT_VIDEO_PATH    = "skeleton.mp4"
+
+# RANGE
+NUM_FRAMES = 57
+
+cameras_txt_path = CAMERAS_TXT_PATH
+
 
 def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
     
@@ -43,7 +59,7 @@ def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
     pass
 
 
-def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
+def load_image(image_path=IMAGE_DIR + "/0000.png"):
     image_open = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if image_open is None:
         raise FileNotFoundError(f"Error: Image not found or unable to read → {image_path}")
@@ -59,7 +75,7 @@ def load_image(image_path = "data/skin_color_1/cam_0000/0000.png"):
     "image": image_open
     }  
             
-def load_extrinsics_by_name(image_name, extrinsics_source="data/cameras/images.txt"):
+def load_extrinsics_by_name(image_name, extrinsics_source=IMAGES_TXT_PATH):
     target = os.path.basename(image_name)
     with open(extrinsics_source, "r") as f:
         for line in f:
@@ -74,6 +90,7 @@ def load_extrinsics_by_name(image_name, extrinsics_source="data/cameras/images.t
 
                 n = (qw*qw + qx*qx + qy*qy + qz*qz) ** 0.5
                 qw, qx, qy, qz = qw/n, qx/n, qy/n, qz/n
+
                 R = np.array([
                     [1-2*(qy*qy+qz*qz),   2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
                     [2*(qx*qy + qz*qw),   1-2*(qx*qx+qz*qz), 2*(qy*qz - qx*qw)],
@@ -81,9 +98,10 @@ def load_extrinsics_by_name(image_name, extrinsics_source="data/cameras/images.t
                 ], dtype=float)
                 t = np.array([tx, ty, tz], dtype=float)
                 return {"R": R, "T": t, "camera_id": cam_id, "image_name": target}
-    raise ValueError(f"Image name '{image_name}' not found in images.txt")         
+    raise ValueError(f"Image name '{image_name}' not found in images.txt")
+        
     
-def parse_skl(skl_path="data/skeleton/0000.skl"):
+def parse_skl(skl_path=SKELETON_DIR + "/0000.skl"):
     joint_names = []
     parent_names = []
     joint_raw = []
@@ -272,7 +290,6 @@ def _read_available_frame_indices(images_txt_path):
     frames = sorted(set(frames))
     return frames
 
-# ---- stable per-bone-name colors ----
 def _bone_name_from_edge(edge, joint_names, order_independent=True):
     p, c = edge
     a = joint_names[p] if 0 <= p < len(joint_names) else str(p)
@@ -289,13 +306,12 @@ def build_bone_color_map_from_names(parents, joint_names, seed=0, order_independ
     for bn in bone_names:
         bone_color_map[bn] = (rng.randint(0,255), rng.randint(0,255), rng.randint(0,255))
     return bone_color_map
-# -------------------------------------
 
 def draw_skeleton(image, uv_list, visible_mask, edges_sorted, colors, style=None):
     cfg = {
         "joint_radius": 3,
         "joint_color": (0, 255, 255),
-        "bone_color": (0, 255, 0),  # fallback
+        "bone_color": (0, 255, 0),
         "bone_thickness": 2,
         "alpha": 0.7,
         "line_type": cv2.LINE_AA,
@@ -319,7 +335,6 @@ def draw_skeleton(image, uv_list, visible_mask, edges_sorted, colors, style=None
     uv_int = np.round(uv).astype(int)
     base, overlay = image, image.copy()
 
-    # Bones
     for idx, (p, c) in enumerate(edges_sorted):
         if p < 0 or c < 0 or p >= N or c >= N:
             continue
@@ -339,7 +354,6 @@ def draw_skeleton(image, uv_list, visible_mask, edges_sorted, colors, style=None
                  thickness=cfg["bone_thickness"],
                  lineType=cfg["line_type"])
 
-    # Joints
     for j in range(N):
         if not mask[j]:
             continue
@@ -373,26 +387,26 @@ def _accumulate_local_to_world(parents, joints_local):
     return J
 
 def render_sequence():
-    frames = _read_available_frame_indices("data/cameras/images.txt")
+    frames = _read_available_frame_indices(IMAGES_TXT_PATH)
     if not frames:
         raise RuntimeError("No frames found in images.txt")
 
     i0 = frames[0]
-    joint_names0, parents0, _, _ = parse_skl(f"data/skeleton/{i0:04d}.skl")
+    joint_names0, parents0, _, _ = parse_skl(os.path.join(SKELETON_DIR, f"{i0:04d}.skl"))
     bone_color_map = build_bone_color_map_from_names(parents0, joint_names0, seed=0, order_independent=True)
 
-    for i in range(57):
+    for i in range(NUM_FRAMES):
         image_name_for_extrinsics = "0000.png"
-        extrinsics = load_extrinsics_by_name(image_name_for_extrinsics, "data/cameras/images.txt")
+        extrinsics = load_extrinsics_by_name(image_name_for_extrinsics, IMAGES_TXT_PATH)
         print("Extrinsics:", extrinsics)
 
         intrinsics = load_cam_intrinsics(cameras_txt_path, camera_id=extrinsics["camera_id"])
         print("Intrinsics:", intrinsics)
 
-        img_info = load_image(f"data/skin_color_1/cam_0000/{i:04d}.png")
+        img_info = load_image(os.path.join(IMAGE_DIR, f"{i:04d}.png"))
         print("Image:", img_info)
 
-        joint_names, parents, joints_raw, units_hint = parse_skl(f"data/skeleton/{i:04d}.skl")
+        joint_names, parents, joints_raw, units_hint = parse_skl(os.path.join(SKELETON_DIR, f"{i:04d}.skl"))
         print("Parsed skeleton:", len(joint_names), "joints; units_hint =", units_hint)
 
         info = infer_global_or_local(parents, joints_raw)
@@ -411,7 +425,6 @@ def render_sequence():
         edges = build_edges_from_parents(parents)
         edges_sorted = sort_edges_by_depth(edges, Zc, order="far_to_near")
 
-        # stable per-bone colors from names
         colors = []
         for e in edges_sorted:
             bn = _bone_name_from_edge(e, joint_names, order_independent=True)
@@ -421,11 +434,11 @@ def render_sequence():
             image, uv_list, mask, edges_sorted, colors,
             style={"joint_color": (255, 255, 255), "bone_thickness": 2, "joint_radius": 2, "alpha": 1.0}
         )
-        cv2.imwrite(f"frame_{i:04d}.png", overlay_image)
+        cv2.imwrite(OUTPUT_FRAME_PATTERN.format(i=i), overlay_image)
         
 def video_generation():
     
-    cap = cv2.VideoCapture("frame_%04d.png")  # use your saved overlay images
+    cap = cv2.VideoCapture(OUTPUT_FRAME_PATTERN.format(i=0).replace("0000", "%04d"))
     
     if not cap.isOpened():
         print("Error: Could not open image sequence.")
@@ -438,11 +451,9 @@ def video_generation():
     
     frame_height, frame_width = frame.shape[:2]
     
-    # Use mp4v for .mp4 output
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter("skeleton.mp4", fourcc, 30.0, (frame_width, frame_height))
+    out = cv2.VideoWriter(OUTPUT_VIDEO_PATH, fourcc, 30.0, (frame_width, frame_height))
     
-    # Write first frame
     out.write(frame)
     
     while True:
@@ -455,7 +466,7 @@ def video_generation():
     cap.release()
     out.release()
     cv2.destroyAllWindows()
-    print("Video saved as skeleton.mp4")
+    print(f"Video saved as {OUTPUT_VIDEO_PATH}")
     
     
 def main():
