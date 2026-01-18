@@ -30,7 +30,28 @@ def parse_mesh_obj(obj_path=OBJ_DIR + "/0000.obj"):
     mesh_vectors = []
     mesh_f = []
     
-    ...
+    with open(obj_path, "r") as f:
+        for line in f:
+            if not line.strip() or line.startswith("#"):
+                continue
+
+            if line.startswith("v "):
+                parts = line.strip().split()
+                x = float(parts[1]); y = float(parts[2]); z = float(parts[3])
+                mesh_vectors.append([x, y, z])
+
+            elif line.startswith("f "):
+                parts = line.strip().split()[1:]
+                face = []
+                for p in parts:
+                    # supports: "i", "i/uv", "i/uv/n", "i//n"
+                    idx = p.split("/")[0]
+                    if idx:
+                        face.append(int(idx) - 1)  # OBJ is 1-based
+                if len(face) >= 3:
+                    mesh_f.append(face)
+
+    return np.array(mesh_vectors, dtype=float), mesh_f
 
 
 def load_cam_intrinsics(cameras_txt_path, camera_id, target_size=None):
@@ -176,6 +197,7 @@ def _read_available_frame_indices(images_txt_path):
     frames = sorted(set(frames))
     return frames
 
+
 def render_sequence():
     frames = _read_available_frame_indices(IMAGES_TXT_PATH)
     if not frames:
@@ -192,7 +214,45 @@ def render_sequence():
         img_info = load_image(os.path.join(IMAGE_DIR, f"{i:04d}.png"))
         print("Image:", img_info)
 
-        
+        verts, faces = parse_mesh_obj(os.path.join(OBJ_DIR, f"{i:04d}.obj"))
+        print("Mesh:", verts.shape, "verts,", len(faces), "faces")
+
+        Xc, Zc = world_to_camera(verts, extrinsics)
+        uv_list = project_pinhole(Xc, intrinsics)
+
+        image = img_info["image"]
+        H, W = image.shape[:2]
+
+        uv = np.asarray(uv_list, dtype=float)
+        uv_int = np.round(uv).astype(int)
+
+        for face in faces:
+            for j in range(len(face)):
+                a = face[j]
+                b = face[(j + 1) % len(face)]
+
+                if a < 0 or b < 0 or a >= len(uv_int) or b >= len(uv_int):
+                    continue
+
+                if not (np.isfinite(uv[a]).all() and np.isfinite(uv[b]).all()):
+                    continue
+
+                if Zc[a] <= 0 or Zc[b] <= 0:
+                    continue
+
+                p1 = uv_int[a]
+                p2 = uv_int[b]
+
+                if (p1[0] < 0 or p1[0] >= W or p1[1] < 0 or p1[1] >= H):
+                    continue
+                if (p2[0] < 0 or p2[0] >= W or p2[1] < 0 or p2[1] >= H):
+                    continue
+
+                cv2.line(image, tuple(p1), tuple(p2), (0, 255, 0), 1, lineType=cv2.LINE_AA)
+
+        cv2.imwrite(f"frame_{i:04d}.png", image)
+
+
 def video_generation():
     
     cap = cv2.VideoCapture(FRAME_GLOB_PATTERN)
